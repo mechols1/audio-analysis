@@ -541,6 +541,110 @@ class CustomAudioAnalysis:
         
         return float(energy)
 
+    def calculate_improved_acousticness(self, y=None, sr=None):
+        """
+        Calculate an improved acousticness measure based on multiple audio features.
+        
+        Acousticness represents the confidence that a track contains primarily acoustic 
+        instruments (vs. electronic/synthetic sounds). This implementation uses multiple 
+        spectral and temporal features for a more robust estimation.
+        
+        Parameters:
+        y (numpy.ndarray): Audio time series, if None uses self.y
+        sr (int): Sample rate, if None uses self.sr
+        
+        Returns:
+        float: Acousticness score between 0.0 and 1.0
+        """
+        if y is None:
+            y = self.y
+        if sr is None:
+            sr = self.sr
+        
+        n_fft = 2048
+        hop_length = 512
+        
+        # 1. Spectral centroid - lower values typically indicate acoustic instruments
+        spectral_centroid = librosa.feature.spectral_centroid(y=y, sr=sr, 
+                                                            n_fft=n_fft, 
+                                                            hop_length=hop_length).mean()
+        # Normalize by Nyquist frequency and invert (lower centroids = higher acousticness)
+        centroid_factor = 1.0 - min((spectral_centroid / (sr/2)) * 0.7, 0.7)
+        
+        # 2. Spectral flatness - acoustic sounds tend to have less flat spectra
+        # (more peaks and valleys in the spectrum)
+        spectral_flatness = librosa.feature.spectral_flatness(y=y, 
+                                                            n_fft=n_fft, 
+                                                            hop_length=hop_length).mean()
+        # Lower flatness = higher acousticness (invert and scale)
+        flatness_factor = 1.0 - min(spectral_flatness * 10, 1.0)
+        
+        # 3. Harmonic vs percussive decomposition
+        # Acoustic instruments often have stronger harmonic content
+        y_harmonic, y_percussive = librosa.effects.hpss(y)
+        
+        # Calculate ratio of harmonic energy to total energy
+        harmonic_energy = np.sum(y_harmonic**2)
+        total_energy = np.sum(y**2) if np.sum(y**2) > 0 else 1
+        harmonic_ratio = harmonic_energy / total_energy
+        
+        # 4. Zero-crossing rate - acoustic sounds often have lower ZCR
+        zcr = librosa.feature.zero_crossing_rate(y=y, 
+                                            hop_length=hop_length).mean()
+        # Lower ZCR = higher acousticness (invert and scale)
+        zcr_factor = 1.0 - min(zcr * 5, 1.0)  # Scale factor may need adjustment
+        
+        # 5. Spectral contrast - acoustic instruments often have higher contrast
+        contrast = librosa.feature.spectral_contrast(y=y, sr=sr, 
+                                                n_fft=n_fft, 
+                                                hop_length=hop_length)
+        # Take mean of contrast across all frequency bands
+        mean_contrast = np.mean(contrast)
+        # Scale contrast to 0-1 range (higher contrast = higher acousticness)
+        contrast_factor = min(mean_contrast / 20, 1.0)  # Scale factor may need adjustment
+        
+        # 6. Spectral bandwidth - acoustic sounds often have more focused bandwidth
+        bandwidth = librosa.feature.spectral_bandwidth(y=y, sr=sr, 
+                                                    n_fft=n_fft, 
+                                                    hop_length=hop_length).mean()
+        # Normalize by Nyquist frequency and invert
+        bandwidth_factor = 1.0 - min((bandwidth / (sr/2)), 1.0)
+        
+        # 7. Harmonic ratio variance - acoustic instruments often have more 
+        # variation in harmonic content over time
+        S = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop_length))
+        if S.shape[1] > 1:  # Ensure we have enough frames
+            harmonic_var = np.var(np.sum(S, axis=0))
+            # Normalize variance (higher variance = higher acousticness)
+            harmonic_var_factor = min(harmonic_var / np.mean(S)**2, 1.0)
+        else:
+            harmonic_var_factor = 0.5  # Default if not enough frames
+        
+        # Combine all factors with appropriate weights
+        acousticness = (
+            0.25 * centroid_factor +      # Most important factor
+            0.20 * flatness_factor +      # Strong indicator 
+            0.15 * harmonic_ratio +       # Important for harmonic instruments
+            0.15 * contrast_factor +      # Important for distinguishing timbres
+            0.10 * zcr_factor +           # Helps identify noisy components
+            0.10 * bandwidth_factor +     # Helps with spectral focus
+            0.05 * harmonic_var_factor    # Adds sensitivity to temporal variations
+        )
+        
+        # Additional adjustments for edge cases:
+        # 1. Strongly harmonic with low flatness is very likely acoustic
+        if harmonic_ratio > 0.8 and flatness_factor > 0.8:
+            acousticness = min(acousticness * 1.2, 1.0)
+        
+        # 2. Very flat spectrum with high ZCR is very likely electronic
+        if flatness_factor < 0.3 and zcr_factor < 0.3:
+            acousticness = acousticness * 0.8
+            
+        # Final normalization
+        acousticness = min(max(acousticness, 0.0), 1.0)
+        
+        return float(acousticness)
+
     # Replace the key detection part in _analyze_basic_features with this:
     def _analyze_basic_features(self):
         """Extract basic audio features with improved key detection"""
@@ -609,18 +713,8 @@ class CustomAudioAnalysis:
         # Electronic sounds often have higher centroid and more noise-like spectrum (higher flatness)
         normalized_centroid = spectral_centroid / (self.sr/2)  # Normalize to 0-1
         
-        # Combine factors with appropriate weights
-        acousticness = (1.0 - normalized_centroid * 0.4) * (1.0 - spectral_flatness * 2)
-        
-        # Penalty for percussion heavy tracks
-        acousticness *= (1.0 - percussive_ratio * 0.6)
-        
-        # Adjust based on bandwidth (acoustic sounds often have less bandwidth)
-        normalized_bandwidth = spectral_bandwidth / (self.sr/4)  # Normalize
-        acousticness = acousticness * (1.0 - normalized_bandwidth * 0.3)
-        
-        # Constrain to 0-1 range
-        acousticness = min(max(acousticness, 0), 1)
+        # Calculate acousticness using acousticness calculation function
+        acousticness = self.calculate_improved_acousticness()
         
         # Improved valence (emotional positivity) calculation
         # Combine multiple factors that contribute to perceived valence

@@ -1,0 +1,32 @@
+{
+  "acoustic1.wav": {
+    "original_acousticness": 0.9758701421016319,
+    "improved_acousticness": 0.924481554915296,
+    "difference": -0.05138858718633588
+  },
+  "acoustic2.wav": {
+    "original_acousticness": 0.9612104137272646,
+    "improved_acousticness": 0.8910459198093039,
+    "difference": -0.07016449391796065
+  },
+  "acoustic3.wav": {
+    "original_acousticness": 0.9172410433059676,
+    "improved_acousticness": 0.8591391602286521,
+    "difference": -0.05810188307731545
+  },
+  "synth_bass.wav": {
+    "original_acousticness": 0.9882866355564968,
+    "improved_acousticness": 0.587227927637635,
+    "difference": -0.4010587079188618
+  },
+  "electronic1.wav": {
+    "original_acousticness": 0.8860301101354112,
+    "improved_acousticness": 0.7209530850672332,
+    "difference": -0.165077025068178
+  },
+  "piano1.wav": {
+    "original_acousticness": 0.9836792747796934,
+    "improved_acousticness": 1.0,
+    "difference": 0.016320725220306587
+  }
+}
